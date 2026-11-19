@@ -20,32 +20,44 @@ Worker component and nothing to do with the Alexa skill.
   count is a multiple of 4.
 - **Front cover = book page 1. Back cover = the last book page.**
 
-## Imposition map (standard saddle-stitch)
+## Imposition map (saddle-stitch, pre-rotated for long-edge duplex)
 
 For `N` book pages (a multiple of 4), sheet `s` (1-based):
 
-| Sheet | Front side — outside of the sheet | Back side — inside of the sheet |
-|-------|-----------------------------------|---------------------------------|
-| `s`   | left `N − 2(s−1)`, right `2(s−1) + 1` | left `2(s−1) + 2`, right `N − 2(s−1) − 1` |
+| Sheet | Front side — outside of the sheet (upright) | Back side — inside of the sheet (pre-rotated 180° in the file) |
+|-------|----------------------------------------------|------------------------------------------------------------------|
+| `s`   | left `N − 2(s−1)`, right `2(s−1) + 1` | left `N − 2(s−1) − 1`, right `2(s−1) + 2` |
 
 The imposed PDF has **2 pages per sheet** — front, then back — so a
 double-sided printer puts PDF pages 1–2 on the first physical sheet,
 3–4 on the second, and so on.
 
+**Why the back side is swapped and upside down in the file:** a
+double-sided printer flips the sheet to print the back, which rotates
+the whole back side 180° — upside down *and* left/right swapped. The
+first test print proved it: the folded booklet read
+**1, 7, 3, 5, 4, 6, 2, 8** — every back-side page upside down and in
+the other half's place, while every front-side page was correct. So
+the back side is pre-rotated 180° in the PDF (halves swapped, each
+half rotated in place). The printer's flip then cancels that out, and
+the folded booklet reads 1, 2, 3, … in order, all upright. **On
+screen the back PDF pages look upside down — that is intentional, not
+a bug. Do not "fix" it by switching the flip setting.**
+
 ### 8-page booklet (the sample)
 
-| Sheet | Front (outside) | Back (inside) |
-|-------|-----------------|---------------|
-| 1     | left: **8** (back cover), right: **1** (front cover) | left: **2**, right: **7** |
-| 2     | left: **6**, right: **3** | left: **4**, right: **5** |
+| Sheet | Front (outside, upright) | Back (inside, pre-rotated) |
+|-------|--------------------------|----------------------------|
+| 1     | left: **8** (back cover), right: **1** (front cover) | left: **7**, right: **2** |
+| 2     | left: **6**, right: **3** | left: **5**, right: **4** |
 
 ### 12-page booklet
 
-| Sheet | Front (outside) | Back (inside) |
-|-------|-----------------|---------------|
-| 1     | left: **12** (back cover), right: **1** (front cover) | left: **2**, right: **11** |
-| 2     | left: **10**, right: **3** | left: **4**, right: **9** |
-| 3     | left: **8**, right: **5** | left: **6**, right: **7** |
+| Sheet | Front (outside, upright) | Back (inside, pre-rotated) |
+|-------|--------------------------|----------------------------|
+| 1     | left: **12** (back cover), right: **1** (front cover) | left: **11**, right: **2** |
+| 2     | left: **10**, right: **3** | left: **9**, right: **4** |
+| 3     | left: **8**, right: **5** | left: **7**, right: **6** |
 
 > ⚠️ **Open question — please confirm, Drew.** In the call you described
 > the first sheet as holding "the cover" and "page 1" on one side, and "the
@@ -128,8 +140,8 @@ What it returns (also as `structuredContent`):
   "sheets": 2,
   "totalPdfPages": 4,
   "imposition": [
-    { "sheet": 1, "front": { "leftPage": 8, "rightPage": 1 }, "back": { "leftPage": 2, "rightPage": 7 } },
-    { "sheet": 2, "front": { "leftPage": 6, "rightPage": 3 }, "back": { "leftPage": 4, "rightPage": 5 } }
+    { "sheet": 1, "front": { "leftPage": 8, "rightPage": 1 }, "back": { "leftPage": 7, "rightPage": 2 } },
+    { "sheet": 2, "front": { "leftPage": 6, "rightPage": 3 }, "back": { "leftPage": 5, "rightPage": 4 } }
   ]
 }
 ```
@@ -139,9 +151,11 @@ PDFs are saved under `output/` in this project.
 ## Print instructions
 
 1. Open the PDF and print **double-sided**.
-2. Set the duplex / flip option to **flip on short edge**. (The sheet is
-   landscape and the fold is vertical; flipping on the short edge keeps
-   the inside pages the right way up and in the right halves.)
+2. Set the duplex / flip option to **flip on long edge**. (This is the
+   printer default on most printers. The back sides are pre-rotated
+   180° in the file to match exactly this flip — see the imposition
+   map above. Do not use "flip on short edge": that is the other flip,
+   and it would put the inside pages upside down and swapped again.)
 3. Print at **100% / Actual size** on US Letter (11 × 8.5 in) — do not
    use "Fit to page", or the book pages will no longer be 5.5 × 8.5 in.
 4. Stack the sheets in order, fold the whole stack in half vertically
@@ -150,7 +164,10 @@ PDFs are saved under `output/` in this project.
    crease with a bone folder or spoon handle so it sits flat.
 5. If a test print comes out with inside pages upside down or swapped
    left/right, the printer's flip setting is wrong — switch it to the
-   other flip option and reprint one sheet before doing the whole run.
+   other flip option ("flip on short edge") and reprint one sheet
+   before doing the whole run. (On screen the back PDF pages look
+   upside down — that is expected; judge only the printed, folded
+   booklet.)
 
 ## Sample & verification
 
@@ -171,7 +188,9 @@ of each sheet a word sits on):
 - page count is even, sheets = pages ÷ 2, book pages = sheets × 4;
 - every sheet side holds the book pages the imposition map predicts,
   in the predicted left/right positions (proved by each content page's
-  footer page number sitting in the right half);
+  footer page number sitting in the right half — near the bottom on
+  upright front sides, near the top on pre-rotated back sides, which
+  also proves the back-side rotation landed in the file);
 - the cover title is on the right half of sheet 1's front, and the
   back-cover closing line is on the left half of sheet 1's front.
 

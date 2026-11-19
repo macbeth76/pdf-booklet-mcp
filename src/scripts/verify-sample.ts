@@ -9,9 +9,12 @@
  *     standard saddle-stitch imposition predicts, in the right positions.
  *     Proof is positional text: `pdftotext -bbox` gives each word's x/y,
  *     so a word's half is decided by its x, and a content page is
- *     identified by its footer page number (drawn near the bottom,
- *     yMin > 560). Cover (1) and back cover (N) have text but no footer;
- *     blank padding pages have no text at all.
+ *     identified by its footer page number. Front sides are upright, so
+ *     the footer sits near the bottom (yMin > 560). Back sides are
+ *     pre-rotated 180° in the PDF (see booklet.ts), so their footer
+ *     sits near the top (yMin < 40) — that is the check that the
+ *     pre-rotation actually landed. Cover (1) and back cover (N) have
+ *     text but no footer; blank padding pages have no text at all.
  *  4. The cover title is on the right half of sheet 1's front, and the
  *     back-cover closing line is on the left half of sheet 1's front.
  *
@@ -101,7 +104,14 @@ async function main(): Promise<void> {
     }
     const side = pdfIndex % 2 === 0 ? sheet.front : sheet.back;
     const sideName = pdfIndex % 2 === 0 ? "front" : "back";
+    const isBack = pdfIndex % 2 === 1;
     const words = bboxPages[pdfIndex] !== undefined ? bboxPages[pdfIndex] : [];
+    // Footer position flips with the pre-rotation: upright front sides
+    // carry the footer near the bottom (yMin > 560); pre-rotated back
+    // sides carry it near the top (yMin < 40). A body line that reaches
+    // the bottom margin would sit at yMin ~54 when rotated, so the
+    // back-side threshold stays below that.
+    const isFooterWord = (w: BBoxWord): boolean => (isBack ? w.yMin < 40 : w.yMin > 560);
     const halves: HalfCheck[] = [
       { expectedPage: side.leftPage, words: words.filter((w) => w.xMin < BOOK_PAGE_WIDTH) },
       { expectedPage: side.rightPage, words: words.filter((w) => w.xMin >= BOOK_PAGE_WIDTH) },
@@ -110,13 +120,13 @@ async function main(): Promise<void> {
       const position = halfIndex === 0 ? "left" : "right";
       const label = `sheet ${sheet.sheet} ${sideName} ${position} = book page ${half.expectedPage}`;
       if (half.expectedPage === 1 || half.expectedPage === bookPages) {
-        const footer = half.words.filter((w) => w.yMin > 560);
+        const footer = half.words.filter(isFooterWord);
         check(`${label} (cover, no footer)`, footer.length === 0 && half.words.length > 0, `${half.words.length} words, ${footer.length} footer words`);
       } else if (half.words.length === 0) {
         blankHalves += 1;
         check(`${label} (blank padding page)`, true, "no text on this half");
       } else {
-        const footer = half.words.filter((w) => w.yMin > 560);
+        const footer = half.words.filter(isFooterWord);
         const found = footer.length === 1 ? Number(footer[0]?.text) : Number.NaN;
         if (!Number.isNaN(found)) {
           footerNumbers.add(found);

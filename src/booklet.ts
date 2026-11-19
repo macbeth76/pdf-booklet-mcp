@@ -11,8 +11,16 @@
  *   multiple of 4.
  * - Standard saddle-stitch imposition, front cover = book page 1,
  *   back cover = last book page.
+ * - Back sides are pre-rotated 180° in the PDF (see computeImposition):
+ *   a double-sided printer flips the sheet to print the back, which
+ *   rotates the whole back side 180° (upside down AND left/right
+ *   swapped). Pre-rotating the back side in the file cancels that
+ *   flip, so with long-edge duplex the folded booklet reads
+ *   1, 2, 3, … in order, all upright. On screen the back PDF pages
+ *   therefore look upside down — that is intentional, not a bug.
+ *   Print double-sided, flip on LONG edge (the printer default).
  */
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -60,7 +68,12 @@ export interface SheetImposition {
   sheet: number;
   /** First-printed side of the sheet (the outside of the booklet). */
   front: { leftPage: number; rightPage: number };
-  /** Second side of the sheet (the inside of the booklet). */
+  /**
+   * Second side of the sheet (the inside of the booklet), as it appears
+   * in the PDF file: left/right are the physical halves, and each half
+   * is drawn rotated 180° (see computeImposition). The printer's
+   * long-edge flip turns them upright and into reading order.
+   */
   back: { leftPage: number; rightPage: number };
 }
 
@@ -79,16 +92,27 @@ export interface CreateBookletResult {
 }
 
 /**
- * Standard saddle-stitch imposition for `totalPages` book pages
- * (must be a multiple of 4).
+ * Saddle-stitch imposition for `totalPages` book pages
+ * (must be a multiple of 4), as the pages physically appear in the PDF.
  *
  * Sheet s (0-based):
- *   front (outside): left = N - 2s,     right = 2s + 1
- *   back  (inside):  left = 2s + 2,     right = N - 2s - 1
+ *   front (outside, upright): left = N - 2s,     right = 2s + 1
+ *   back  (inside, pre-rotated 180° in the file):
+ *                              left = N - 2s - 1, right = 2s + 2
  *
- * Check for N = 12, sheet 1: front [12 | 1], back [2 | 11] — the cover
- * (1) sits on the outside right, the back cover (12) on the outside
- * left, and page 2 backs onto the cover, as a folded booklet requires.
+ * Why the back is swapped, not just rotated in place: a duplex flip
+ * rotates the *whole* back side 180°, so a page drawn upright on the
+ * left half prints on the right half upside down (and vice versa).
+ * That is exactly what a test print showed: the folded booklet read
+ * 1, 7, 3, 5, 4, 6, 2, 8 — every back-side page upside down and in the
+ * other half's place, while every front-side page was correct.
+ * Swapping the back halves AND rotating each 180° in place cancels
+ * the printer's whole-side flip, so with long-edge duplex the folded
+ * booklet reads 1, 2, 3, … in order, all upright.
+ *
+ * Check for N = 8, sheet 1: front [8 | 1], back [7 | 2] (rotated) —
+ * the cover (1) sits on the outside right, the back cover (8) on the
+ * outside left, and page 2 backs onto the cover once printed.
  */
 export function computeImposition(totalPages: number): SheetImposition[] {
   if (totalPages <= 0 || totalPages % 4 !== 0) {
@@ -99,7 +123,7 @@ export function computeImposition(totalPages: number): SheetImposition[] {
     sheets.push({
       sheet: s + 1,
       front: { leftPage: totalPages - 2 * s, rightPage: 2 * s + 1 },
-      back: { leftPage: 2 * s + 2, rightPage: totalPages - 2 * s - 1 },
+      back: { leftPage: totalPages - 2 * s - 1, rightPage: 2 * s + 2 },
     });
   }
   return sheets;
@@ -433,15 +457,41 @@ export async function createBooklet(input: CreateBookletInput): Promise<CreateBo
   const indices = Array.from({ length: bookPages }, (_, i) => i);
   const embedded = await imposedDoc.embedPdf(bookBytes, indices);
   for (const sheet of imposition) {
-    for (const side of [sheet.front, sheet.back] as const) {
+    for (const { side, isBack } of [
+      { side: sheet.front, isBack: false },
+      { side: sheet.back, isBack: true },
+    ] as const) {
       const imposedPage = imposedDoc.addPage([SHEET_WIDTH, SHEET_HEIGHT]);
       const left = embedded[side.leftPage - 1];
       const right = embedded[side.rightPage - 1];
       if (left === undefined || right === undefined) {
         throw new Error(`Internal error: missing embedded book page for sheet ${sheet.sheet}`);
       }
-      imposedPage.drawPage(left, { x: 0, y: 0, width: BOOK_PAGE_WIDTH, height: BOOK_PAGE_HEIGHT });
-      imposedPage.drawPage(right, { x: BOOK_PAGE_WIDTH, y: 0, width: BOOK_PAGE_WIDTH, height: BOOK_PAGE_HEIGHT });
+      if (!isBack) {
+        imposedPage.drawPage(left, { x: 0, y: 0, width: BOOK_PAGE_WIDTH, height: BOOK_PAGE_HEIGHT });
+        imposedPage.drawPage(right, { x: BOOK_PAGE_WIDTH, y: 0, width: BOOK_PAGE_WIDTH, height: BOOK_PAGE_HEIGHT });
+      } else {
+        // Pre-rotated 180° in place: drawing with rotate 180° about the
+        // half's bottom-left corner would land off-page, so anchor at
+        // the half's top-right corner (x = half right edge, y = top).
+        // Verified empirically: this puts the rotated page exactly
+        // inside its own half, top and bottom swapped, left and right
+        // swapped within the half.
+        imposedPage.drawPage(left, {
+          x: BOOK_PAGE_WIDTH,
+          y: SHEET_HEIGHT,
+          width: BOOK_PAGE_WIDTH,
+          height: BOOK_PAGE_HEIGHT,
+          rotate: degrees(180),
+        });
+        imposedPage.drawPage(right, {
+          x: SHEET_WIDTH,
+          y: SHEET_HEIGHT,
+          width: BOOK_PAGE_WIDTH,
+          height: BOOK_PAGE_HEIGHT,
+          rotate: degrees(180),
+        });
+      }
     }
   }
 
