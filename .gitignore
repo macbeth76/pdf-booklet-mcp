@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# Generated PDFs are reproducible via `npm run sample` / the MCP tool,
+# so no PDF is committed — including output/sample-booklet.pdf.
+output/*.pdf
+.DS_Store
